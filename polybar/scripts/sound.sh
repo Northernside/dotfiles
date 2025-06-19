@@ -1,32 +1,41 @@
 #!/bin/bash
 
-function main() {
-    # Pipewire / PulseAudio
-    SOURCE=$(pw-record --list-targets | sed -n 's/^*.*"\(.*\)" prio=.*$/\1/p' | head -n1)
-    SINK=$(pw-play --list-targets | sed -n 's/^*.*"\(.*\)" prio=.*$/\1/p' | head -n1)
-    
+function get_status() {
+    SINK=$(pactl info | grep "Default Sink" | awk '{print $3}')
+    SINK_NICENAME="Default Output"
+    if [[ "$SINK" == *.* ]]; then
+        SINK_NICENAME=$(echo "$SINK" | awk -F. '{print $NF}')
+    fi
+
     if [ -z "$SINK" ]; then
         echo "No sink found"
-        exit 1
+        return
     fi
 
     VOLUME=$(pactl list sinks | grep -A 15 "Name: $SINK" | grep 'Volume:' | head -n1 | awk '{print $5}' | tr -d '%')
     IS_MUTED=$(pactl list sinks | grep -A 15 "Name: $SINK" | grep 'Mute:' | awk '{print $2}')
 
-    action=$1
-    if [ "$action" == "up" ]; then
-        pactl set-sink-volume @DEFAULT_SINK@ +10%
-    elif [ "$action" == "down" ]; then
-        pactl set-sink-volume @DEFAULT_SINK@ -10%
-    elif [ "$action" == "mute" ]; then
-        pactl set-sink-mute @DEFAULT_SINK@ toggle
+    if [ "$IS_MUTED" == "yes" ]; then
+        echo "$SINK_NICENAME MUTED"
     else
-        if [ "$IS_MUTED" == "yes" ]; then
-            echo " ${SOURCE} |  MUTED ${SINK}"
-        else
-            echo " ${SOURCE} |  ${VOLUME}% ${SINK}"
-        fi
+        echo "$SINK_NICENAME ${VOLUME}%"
     fi
 }
 
-main "$@"
+function control_volume() {
+    case "$1" in
+        up)
+            pactl set-sink-volume @DEFAULT_SINK@ +5%
+            ;;
+        down)
+            pactl set-sink-volume @DEFAULT_SINK@ -5%
+            ;;
+    esac
+}
+
+if [[ "$1" == "up" || "$1" == "down" ]]; then
+    control_volume "$1"
+    exit 0
+fi
+
+get_status
