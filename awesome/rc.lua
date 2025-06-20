@@ -118,7 +118,8 @@ globalkeys = gears.table.join(
             naughty.notify({ title = "Screenshot taken", text = "Full screenshot copied to clipboard", timeout = 2 })
         end)
     end, {description = "Take a full screenshot", group = "launcher"}),
-    awful.key({ "Control", "Shift" }, "d",
+
+    awful.key({ "Control", "Shift" }, "r",
     function()
         local random_str = tostring(math.random(100000, 999999))
         local tmpfile = "/tmp/screenshot_delayed_" .. random_str .. ".png"
@@ -127,6 +128,47 @@ globalkeys = gears.table.join(
             naughty.notify({ title = "Screenshot taken", text = "Delayed full screenshot copied to clipboard", timeout = 2 })
         end)
     end, {description = "Take a delayed (3s) full screenshot", group = "launcher"}),
+
+    awful.key({ modkey, "Shift" }, "r",
+    function()
+        awful.spawn.easy_async_with_shell("slop -f '%x %y %w %h'", function(stdout)
+            local x, y, w, h = stdout:match("(%d+)%s+(%d+)%s+(%d+)%s+(%d+)")
+            if not (x and y and w and h) then
+                naughty.notify({ title = "❌ Recording failed", text = "Could not get region from slop", timeout = 2 })
+                return
+            end
+
+            naughty.notify({ title = "🎥 Recording started", text = "Recording selected region...", timeout = 4 })
+
+            local output_file = os.date(os.getenv("HOME") .. "/Videos/recording_%F_%H-%M-%S.mkv")
+            local cmd = string.format(
+                'ffmpeg -y -video_size %sx%s -framerate 60 -f x11grab -i :0.0+%s,%s -preset ultrafast "%s" & echo $! > /tmp/ffmpeg_recording.pid',
+                w, h, x, y, output_file
+            )
+
+            awful.spawn.with_shell(cmd)
+        end)
+    end, {description = "Start screen recording of selected area", group = "custom"}),
+    awful.key({ modkey, "Shift" }, "e",
+    function()
+        local output_file = os.date(os.getenv("HOME") .. "/Videos/recording_%F_%H-%M-%S.mkv")
+        local script = string.format([[
+            tmp_pid_file="/tmp/ffmpeg_recording.pid"
+            if [ -f "$tmp_pid_file" ]; then
+                kill "$(cat "$tmp_pid_file")" && rm "$tmp_pid_file"
+            fi
+            echo "%s" > /tmp/last_recording_path
+        ]], output_file)
+
+        awful.spawn.easy_async_with_shell(script, function()
+            naughty.notify({
+                title = "🛑 Recording stopped",
+                text = "Click to open with mpv",
+                timeout = 5,
+            })
+        end)
+    end, {description = "Stop screen recording", group = "custom"}),
+
 
     awful.key({ modkey, }, "Return", function () awful.spawn(terminal) end, { description = "Open a terminal", group = "launcher" }),
     awful.key({ modkey, "Control" }, "r", awesome.restart, { description = "Respring", group = "awesome" }),
@@ -139,7 +181,8 @@ globalkeys = gears.table.join(
         end
     end, { description = "Restore minimized", group = "client" }),
 
-    awful.key({ modkey, }, "w", function() awful.spawn("rofi-wifi-menu.sh") end, { description = "Spotlight", group = "launcher" })
+    awful.key({ modkey, }, "w", function() awful.spawn(os.getenv("HOME") .. "/.config/rofi/rofi-wifi-menu.sh") end, { description = "Spotlight", group = "launcher" }),
+    awful.key({ modkey, }, ".", function() awful.spawn(os.getenv("HOME") .. "/.config/rofi/rofi-emoji-picker.sh") end, { description = "Spotlight", group = "launcher" })
 )
 
 clientkeys = gears.table.join(
@@ -220,6 +263,16 @@ awful.rules.rules = {
         },
         properties = { titlebars_enabled = true }
     },
+    {
+        rule = { class = "farcry5.exe" },
+        properties = {
+            floating = true,
+            fullscreen = true,
+            focus = true,
+            ontop = true,
+            placement = awful.placement.centered
+        }
+    },
 }
 
 client.connect_signal("manage", function (c)
@@ -278,6 +331,26 @@ end)
 
 client.connect_signal("focus", function(c) c.border_color = beautiful.border_focus end)
 client.connect_signal("unfocus", function(c) c.border_color = beautiful.border_normal end)
+
+naughty.connect_signal("destroyed", function(n, reason)
+    if reason == require("naughty.constants").notification_closed_reason.dismissed_by_user then
+        if n.title == "🛑 Recording stopped" then
+            awful.spawn("mpv --geometry=1280x720 $(cat /tmp/last_recording_path)", false)
+        end
+
+        if not n.clients then return end
+        local jumped = false
+        for _, c in ipairs(n.clients) do
+            c.urgent = true
+            if jumped then
+                c:activate{ context = "client.jumpto" }
+            else
+                c:jump_to()
+                jumped = true
+            end
+        end
+    end
+end)
 
 awful.spawn.with_shell("picom --config ~/.config/picom/picom.conf &")
 awful.spawn.with_shell("killall -q polybar; polybar example &")
